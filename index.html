@@ -3,72 +3,191 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loup-Garou en Famille</title>
+    <title>Loup-Garou en Famille - V2</title>
     
+    <!-- Design immersif et sombre spécial Loup-Garou -->
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; background-color: #1a1a2e; color: white; padding: 20px; }
-        button { background-color: #e94560; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 8px; cursor: pointer; margin: 10px; width: 80%; max-width: 300px; }
-        button:hover { background-color: #ff6b81; }
-        .card { background-color: #16213e; padding: 20px; border-radius: 10px; margin: 20px auto; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
-        input { padding: 12px; font-size: 16px; border-radius: 5px; border: none; margin: 10px; text-align: center; width: 70%; max-width: 250px; }
-        .status { font-weight: bold; color: #4eed50; font-size: 22px; margin: 15px 0; }
+        :root {
+            --bg-color: #0b0c10;
+            --card-color: #1f2833;
+            --accent-blood: #8a0303;
+            --accent-gold: #c5a059;
+            --text-color: #c5c6c7;
+        }
+
+        body { 
+            font-family: 'Georgia', serif; 
+            text-align: center; 
+            background-color: var(--bg-color); 
+            color: var(--text-color); 
+            padding: 15px;
+            margin: 0;
+            transition: background-color 2s ease;
+        }
+
+        /* Ambiance Nuit */
+        body.nuit {
+            background-color: #020205;
+        }
+
+        h1 { 
+            color: var(--accent-blood); 
+            font-size: 28px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            margin-top: 20px;
+        }
+
+        h2 { color: var(--accent-gold); font-size: 20px; }
+
+        .card { 
+            background-color: var(--card-color); 
+            padding: 20px; 
+            border-radius: 12px; 
+            margin: 15px auto; 
+            max-width: 400px; 
+            box-shadow: 0 6px 12px rgba(0,0,0,0.5); 
+            border: 1px solid #2f3e46;
+        }
+
+        /* Boutons stylisés */
+        button { 
+            background-color: #111; 
+            color: var(--accent-gold); 
+            border: 2px solid var(--accent-gold); 
+            padding: 12px 24px; 
+            font-size: 16px; 
+            font-family: 'Georgia', serif;
+            border-radius: 6px; 
+            cursor: pointer; 
+            margin: 8px; 
+            width: 85%; 
+            max-width: 280px; 
+            transition: all 0.3s;
+        }
+        button:hover { 
+            background-color: var(--accent-gold); 
+            color: black; 
+        }
+
+        .btn-blood {
+            border-color: var(--accent-blood);
+            color: var(--accent-blood);
+        }
+        .btn-blood:hover {
+            background-color: var(--accent-blood);
+            color: white;
+        }
+
+        input { 
+            padding: 12px; 
+            font-size: 16px; 
+            border-radius: 6px; 
+            border: 1px solid var(--accent-gold); 
+            background-color: #111;
+            color: white;
+            margin: 8px; 
+            text-align: center; 
+            width: 75%; 
+            max-width: 240px; 
+        }
+
+        .status { 
+            font-weight: bold; 
+            font-size: 24px; 
+            margin: 15px 0; 
+            color: var(--accent-gold);
+        }
+
+        /* Zones masquées au départ */
+        #screen-game, #mj-controls { display: none; }
     </style>
 
+    <!-- Outil de communication en temps réel -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
 </head>
 <body>
 
-    <h1>🐺 Loup-Garou Famille 🐺</h1>
-    <p>Tapez le MÊME nom secret pour connecter vos téléphones ensemble !</p>
-    
-    <input type="text" id="familyName" value="mafamille" placeholder="Ex: dupontloup">
-    <br>
-    <button onclick="connecter()">1. Rejoindre la partie</button>
+    <h1>🐺 LE LOUP-GAROU 🐺</h1>
 
-    <div class="card">
-        <h3>Statut du jeu en direct :</h3>
-        <p id="gameStatus" class="status">Non connecté 🔴</p>
+    <!-- ÉCRAN 1 : CONNEXION ET CHOIX DU RÔLE -->
+    <div id="screen-setup" class="card">
+        <h2>Configuration de la partie</h2>
+        <p>1. Entrez le nom de votre famille :</p>
+        <input type="text" id="familyName" value="mafamille">
+        
+        <p>2. Choisissez votre rôle sur ce téléphone :</p>
+        <button onclick="rejoindre('mj')">👑 Être le Maître du Jeu</button>
+        <button onclick="rejoindre('joueur')">🛡️ Être un Joueur</button>
     </div>
 
-    <div class="card">
-        <h3>Commandes du Maître du Jeu :</h3>
-        <button onclick="envoyerAction('La nuit tombe... Tout le monde dort 🌙')">💤 Faire dormir le village</button>
-        <button onclick="envoyerAction('Le soleil se lève... ☀️')">☀️ Réveiller le village</button>
+    <!-- ÉCRAN 2 : LE JEU EN DIRECT -->
+    <div id="screen-game">
+        <div class="card">
+            <h2 id="roleTitle">Salon de jeu</h2>
+            <p id="gameStatus" class="status">En attente du début... ⏳</p>
+        </div>
+
+        <!-- SECTION MAÎTRE DU JEU (Masquée pour les simples joueurs) -->
+        <div id="mj-controls" class="card" style="border-color: var(--accent-blood);">
+            <h2>Panneau de Contrôle (MJ)</h2>
+            <button onclick="envoyerAction('NUIT')">💤 Faire dormir le village</button>
+            <button onclick="envoyerAction('JOUR')">☀️ Réveiller le village</button>
+        </div>
     </div>
 
     <script>
         let client;
-        let topicBase = "loupgarufamille/salon/";
+        let topicBase = "loupgarufamille/salon2/";
+        let monRole = "";
 
-        function connecter() {
+        function rejoindre(roleChoisi) {
             const name = document.getElementById('familyName').value.trim().toLowerCase();
-            if(!name) return alert("Choisis un nom de salon !");
+            if(!name) return alert("Veuillez entrer un nom de famille !");
             
-            document.getElementById('gameStatus').innerText = "Connexion...";
-            document.getElementById('gameStatus').style.color = "orange";
-            
-            // Connexion au réseau de communication gratuit
+            monRole = roleChoisi;
+
+            // Masquer l'écran de configuration et afficher l'écran de jeu
+            document.getElementById('screen-setup').style.display = 'none';
+            document.getElementById('screen-game').style.display = 'block';
+
+            // Si c'est le MJ, on lui montre ses boutons secrets
+            if (monRole === 'mj') {
+                document.getElementById('mj-controls').style.display = 'block';
+                document.getElementById('roleTitle').innerText = "🧙‍♂️ Vous êtes le Maître du Jeu";
+                document.getElementById('gameStatus').innerText = "Prêt à guider le village. 🟢";
+            } else {
+                document.getElementById('roleTitle').innerText = "🧑‍🌾 Vous êtes un Villageois";
+            }
+
+            // Connexion au nuage de communication
             client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
             client.on('connect', function () {
-                document.getElementById('gameStatus').innerText = "Connecté ! En attente du Maître... 🟢";
-                document.getElementById('gameStatus').style.color = "#4eed50";
-                // On écoute la ligne de notre famille
                 client.subscribe(topicBase + name);
             });
 
+            // Quand un message arrive (Changement jour/nuit)
             client.on('message', function (topic, message) {
-                // Dès qu'un message arrive, il change l'écran de tout le monde instantanément
-                document.getElementById('gameStatus').innerText = message.toString();
+                const action = message.toString();
+                const statusText = document.getElementById('gameStatus');
+
+                if (action === 'NUIT') {
+                    document.body.classList.add('nuit');
+                    statusText.innerText = "La nuit tombe... Tout le monde dort 🌙";
+                    statusText.style.color = "#7f8c8d";
+                } else if (action === 'JOUR') {
+                    document.body.classList.remove('nuit');
+                    statusText.innerText = "Le soleil se lève... ☀️";
+                    statusText.style.color = "#ffdd57";
+                }
             });
         }
 
-        function envoyerAction(message) {
+        function envoyerAction(action) {
             const name = document.getElementById('familyName').value.trim().toLowerCase();
-            if(!client || !client.connected) return alert("Clique d'abord sur 'Rejoindre la partie' !");
-            
-            // On envoie le message sur la ligne de notre famille
-            client.publish(topicBase + name, message);
+            if(client && client.connected) {
+                client.publish(topicBase + name, action);
+            }
         }
     </script>
 </body>
