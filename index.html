@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loup-Garou en Famille</title>
+    
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background-color: #1a1a2e; color: white; padding: 20px; }
+        button { background-color: #e94560; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 8px; cursor: pointer; margin: 10px; width: 80%; max-width: 300px; }
+        button:hover { background-color: #ff6b81; }
+        .card { background-color: #16213e; padding: 20px; border-radius: 10px; margin: 20px auto; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        input { padding: 12px; font-size: 16px; border-radius: 5px; border: none; margin: 10px; text-align: center; width: 70%; max-width: 250px; }
+        .status { font-weight: bold; color: #4eed50; font-size: 22px; margin: 15px 0; }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+</head>
+<body>
+
+    <h1>🐺 Loup-Garou Famille 🐺</h1>
+    <p>Tapez le MÊME nom secret pour connecter vos téléphones ensemble !</p>
+    
+    <input type="text" id="familyName" value="mafamille" placeholder="Ex: dupontloup">
+    <br>
+    <button onclick="connecter()">1. Rejoindre la partie</button>
+
+    <div class="card">
+        <h3>Statut du jeu en direct :</h3>
+        <p id="gameStatus" class="status">Non connecté 🔴</p>
+    </div>
+
+    <div class="card">
+        <h3>Commandes du Maître du Jeu :</h3>
+        <button onclick="envoyerAction('La nuit tombe... Tout le monde dort 🌙')">💤 Faire dormir le village</button>
+        <button onclick="envoyerAction('Le soleil se lève... ☀️')">☀️ Réveiller le village</button>
+    </div>
+
+    <script>
+        let client;
+        let topicBase = "loupgarufamille/salon/";
+
+        function connecter() {
+            const name = document.getElementById('familyName').value.trim().toLowerCase();
+            if(!name) return alert("Choisis un nom de salon !");
+            
+            document.getElementById('gameStatus').innerText = "Connexion...";
+            document.getElementById('gameStatus').style.color = "orange";
+            
+            // Connexion au réseau de communication gratuit
+            client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+
+            client.on('connect', function () {
+                document.getElementById('gameStatus').innerText = "Connecté ! En attente du Maître... 🟢";
+                document.getElementById('gameStatus').style.color = "#4eed50";
+                // On écoute la ligne de notre famille
+                client.subscribe(topicBase + name);
+            });
+
+            client.on('message', function (topic, message) {
+                // Dès qu'un message arrive, il change l'écran de tout le monde instantanément
+                document.getElementById('gameStatus').innerText = message.toString();
+            });
+        }
+
+        function envoyerAction(message) {
+            const name = document.getElementById('familyName').value.trim().toLowerCase();
+            if(!client || !client.connected) return alert("Clique d'abord sur 'Rejoindre la partie' !");
+            
+            // On envoie le message sur la ligne de notre famille
+            client.publish(topicBase + name, message);
+        }
+    </script>
+</body>
+</html>
