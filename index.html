@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loup-Garou en Famille - Modes & Rôles</title>
+    <title>Loup-Garou en Famille - Version MJ Assist</title>
     
     <style>
         :root {
@@ -116,13 +116,12 @@
             <button onclick="validerVote()" style="border-color: orange; color: orange;">🗳️ Valider mon vote</button>
         </div>
 
-        <!-- ZONE RÔLE SECRET (Avec descriptif flash) -->
+        <!-- ZONE RÔLE SECRET -->
         <div id="player-role-zone" class="card">
             <h3>👁️ Votre Rôle Secret :</h3>
             <div id="roleCard" class="secret-card" onclick="revelerRole()">
                 CLIQUEZ POUR RÉVÉLER
             </div>
-            <!-- Ligne de texte courte pour aider le joueur sans le faire remarquer -->
             <p id="roleDesc" style="font-style: italic; color: #ffcc00; margin-top: 15px; font-size: 15px; min-height: 20px; font-weight: bold;"></p>
         </div>
 
@@ -136,7 +135,7 @@
         <div id="mj-controls" class="card" style="border-color: var(--accent-blood);">
             <h2>Panneau de Contrôle (MJ)</h2>
             
-            <!-- Avant de lancer (Sélection du Mode) -->
+            <!-- Avant de lancer -->
             <div id="mj-lobby">
                 <p>⚙️ Choix de la variante :</p>
                 <select id="gameModeSelect">
@@ -161,7 +160,7 @@
                     <div id="mj-vote-live-results" style="text-align: left; margin-top: 10px; color: orange;"></div>
                 </div>
 
-                <h3 style="margin-top:20px; border-top:1px solid #444; padding-top:15px;">Gestion du Village :</h3>
+                <h3 style="margin-top:20px; border-top:1px solid #444; padding-top:15px;">Gestion du Village (Vue MJ) :</h3>
                 <ul id="mjInGameList"></ul>
             </div>
         </div>
@@ -175,11 +174,11 @@
         let monRoleSecret = "En attente...";
         let listeJoueurs = []; 
         let statutJoueurs = {}; 
+        let rolesJoueurs = {}; // Mémoire globale du MJ pour stocker la distribution
         let estVivant = true;
         let votesRecus = {};
         let quiAVote = [];
 
-        // Dictionnaire des descriptions flash (une phrase très courte)
         const descriptionsFlash = {
             "Loup-Garou": "Éliminez un villageois chaque nuit avec vos compères.",
             "Voyante": "Découvrez le rôle secret d'un joueur chaque nuit.",
@@ -189,6 +188,17 @@
             "Cupidon": "Désignez deux amoureux secrets au tout début du jeu.",
             "Petite Fille": "Vous pouvez entrouvrir les yeux discrètement durant la nuit.",
             "Idiot du Village": "Survivez au vote du village, mais vous perdez votre vote."
+        };
+
+        const emojisRoles = {
+            "Loup-Garou": "🐺",
+            "Voyante": "👁️",
+            "Sorcière": "🧪",
+            "Villageois": "🧑‍🌾",
+            "Chasseur": "🏹",
+            "Cupidon": "💘",
+            "Petite Fille": "👧",
+            "Idiot du Village": "🤪"
         };
 
         function rejoindre(roleChoisi) {
@@ -269,7 +279,7 @@
                     }
                     else if (msg.startsWith('MORT:')) {
                         const victime = msg.replace('MORT:', '');
-                        statutJoueurs[victim] = 'mort';
+                        statutJoueurs[victime] = 'mort';
                         marquerMort(victime);
                     }
                     else if (msg === 'VOTE_OUVERT') {
@@ -292,12 +302,10 @@
             if (card.innerText === "CLIQUEZ POUR RÉVÉLER") {
                 card.innerText = monRoleSecret;
                 card.style.backgroundColor = "#8a0303";
-                // Affiche la description instantanément en dessous
                 desc.innerText = descriptionsFlash[monRoleSecret] || "";
             } else {
                 card.innerText = "CLIQUEZ POUR RÉVÉLER";
                 card.style.backgroundColor = "#2c3e50";
-                // Masque à nouveau la description
                 desc.innerText = "";
             }
         }
@@ -310,6 +318,10 @@
             });
         }
 
+        function abrirBoitierVoteJoueur() { // (Nom gardé identique en interne pour MQTT)
+            ouvrirBoitierVoteJoueur();
+        }
+        
         function ouvrirBoitierVoteJoueur() {
             const select = document.getElementById('voteSelect');
             select.innerHTML = '<option value="">-- Choisir un suspect --</option>';
@@ -368,7 +380,6 @@
             let mode = document.getElementById('gameModeSelect').value;
 
             if (mode === 'classique') {
-                // DISTRIBUTION CLASSIQUE
                 if (nbJoueurs <= 3) { roles = ["Loup-Garou", "Voyante", "Villageois"]; } 
                 else if (nbJoueurs === 4) { roles = ["Loup-Garou", "Voyante", "Sorcière", "Villageois"]; } 
                 else {
@@ -376,25 +387,23 @@
                     while (roles.length < nbJoueurs) { roles.push("Villageois"); }
                 }
             } else {
-                // DISTRIBUTION CONFIRMÉ (Rôles supplémentaires)
                 if (nbJoueurs <= 3) { roles = ["Loup-Garou", "Voyante", "Chasseur"]; } 
                 else if (nbJoueurs === 4) { roles = ["Loup-Garou", "Voyante", "Sorcière", "Chasseur"]; } 
                 else {
-                    // Base 5 joueurs
                     roles = ["Loup-Garou", "Loup-Garou", "Voyante", "Sorcière", "Chasseur"];
                     if (nbJoueurs >= 6) roles.push("Cupidon");
                     if (nbJoueurs >= 7) roles.push("Petite Fille");
                     if (nbJoueurs >= 8) roles.push("Idiot du Village");
-                    // Remplissage si encore plus de monde
                     while (roles.length < nbJoueurs) { roles.push("Villageois"); }
                 }
             }
 
-            // Mélange aléatoire
             roles.sort(() => Math.random() - 0.5);
 
+            rolesJoueurs = {}; // Réinitialise la mémoire du MJ
             for (let i = 0; i < nbJoueurs; i++) {
                 statutJoueurs[listeJoueurs[i]] = 'vivant';
+                rolesJoueurs[listeJoueurs[i]] = roles[i]; // On enregistre le rôle localement chez le MJ
                 client.publish("loupgarufamille/" + family + "/private/" + listeJoueurs[i].toLowerCase(), roles[i]);
             }
 
@@ -410,7 +419,15 @@
             const ul = document.getElementById('mjInGameList');
             ul.innerHTML = "";
             listeJoueurs.forEach(p => {
-                ul.innerHTML += `<li id="mj-p-${p.toLowerCase()}"><span>👤 ${p}</span> <button id="btn-kill-${p.toLowerCase()}" class="btn-small-kill" onclick="eliminerJoueur('${p}')">💀 Éliminer</button></li>`;
+                const roleText = rolesJoueurs[p] || "Villageois";
+                const emoji = emojisRoles[roleText] || "👤";
+                
+                // Affichage personnalisé pour le MJ : Émoji + Prénom + (Nom du rôle)
+                ul.innerHTML += `
+                    <li id="mj-p-${p.toLowerCase()}">
+                        <span>${emoji} <strong>${p}</strong> <small style="color:var(--accent-gold); margin-left:5px;">(${roleText})</small></span> 
+                        <button id="btn-kill-${p.toLowerCase()}" class="btn-small-kill" onclick="eliminerJoueur('${p}')">💀 Éliminer</button>
+                    </li>`;
             });
         }
 
