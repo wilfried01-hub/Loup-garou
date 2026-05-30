@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Loup-Garou en Famille - Version Finale</title>
+    <title>Loup-Garou en Famille - Version Vote</title>
     
     <style>
         :root {
@@ -59,18 +59,12 @@
         .btn-blood:hover { background-color: var(--accent-blood); color: white; }
         
         .btn-small-kill {
-            background-color: #000;
-            color: var(--accent-blood);
-            border: 1px solid var(--accent-blood);
-            padding: 5px 10px;
-            font-size: 12px;
-            width: auto;
-            display: inline-block;
-            margin-left: 10px;
+            background-color: #000; color: var(--accent-blood); border: 1px solid var(--accent-blood);
+            padding: 5px 10px; font-size: 12px; width: auto; display: inline-block; margin-left: 10px;
         }
         .btn-small-kill:hover { background-color: var(--accent-blood); color: white; }
 
-        input { 
+        input, select { 
             padding: 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--accent-gold); 
             background-color: #111; color: white; margin: 8px; text-align: center; width: 75%; max-width: 240px; 
         }
@@ -83,12 +77,11 @@
             margin: 15px auto; max-width: 250px;
         }
 
-        /* Styles des listes de joueurs */
         ul { list-style-type: none; padding: 0; }
         li { background: rgba(255,255,255,0.05); padding: 12px; margin: 6px 0; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
         li.mort { text-decoration: line-through; opacity: 0.4; background: rgba(138, 3, 3, 0.2); color: #ff6666; }
 
-        #screen-game, #mj-controls, #player-role-zone, #village-life-zone { display: none; }
+        #screen-game, #mj-controls, #player-role-zone, #village-life-zone, #vote-zone { display: none; }
     </style>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
@@ -100,7 +93,7 @@
     <!-- ÉCRAN 1 : CONFIGURATION -->
     <div id="screen-setup" class="card">
         <h2>Configuration de la partie</h2>
-        <input type="text" id="familyName" placeholder="Nom de famille">
+        <input type="text" id="familyName" value="mafamille" placeholder="Nom de famille">
         <input type="text" id="playerPseudo" placeholder="Votre Prénom / Pseudo">
         <br><br>
         <button onclick="rejoindre('mj')" class="btn-blood">👑 Être le Maître du Jeu</button>
@@ -114,6 +107,15 @@
             <p id="gameStatus" class="status">Connexion en cours... ⏳</p>
         </div>
 
+        <!-- ZONE DE VOTE AUTOMATIQUE (Joueurs uniquement) -->
+        <div id="vote-zone" class="card" style="border-color: orange;">
+            <h3>⚖️ LE TRIBUNAL DU VILLAGE</h3>
+            <p>Sélectionnez le suspect à éliminer :</p>
+            <select id="voteSelect"></select>
+            <br>
+            <button onclick="validerVote()" style="border-color: orange; color: orange;">🗳️ Valider mon vote</button>
+        </div>
+
         <!-- ZONE RÔLE SECRET (Joueurs uniquement) -->
         <div id="player-role-zone" class="card">
             <h3>👁️ Votre Rôle Secret :</h3>
@@ -122,7 +124,7 @@
             </div>
         </div>
 
-        <!-- ZONE LISTE DU VILLAGE (Visible pour les joueurs une fois le jeu lancé) -->
+        <!-- ZONE LISTE DU VILLAGE -->
         <div id="village-life-zone" class="card">
             <h3>👥 Habitants du Village :</h3>
             <ul id="villagePlayersList"></ul>
@@ -144,6 +146,13 @@
                 <button onclick="envoyerAction('NUIT')">💤 Faire dormir le village</button>
                 <button onclick="envoyerAction('JOUR')">☀️ Réveiller le village</button>
                 
+                <!-- Contrôle des votes -->
+                <div style="margin-top:15px; background: rgba(0,0,0,0.3); padding:10px; border-radius:8px;">
+                    <button onclick="ouvrirVote()" style="border-color: orange; color: orange;">🗳️ Lancer un Vote</button>
+                    <button id="btn-fermer-vote" onclick="fermerVote()" style="display:none; border-color: #ffcc00; color: #ffcc00;">🔒 Clôturer le Vote</button>
+                    <div id="mj-vote-live-results" style="text-align: left; margin-top: 10px; color: orange;"></div>
+                </div>
+
                 <h3 style="margin-top:20px; border-top:1px solid #444; padding-top:15px;">Gestion du Village :</h3>
                 <ul id="mjInGameList"></ul>
             </div>
@@ -157,8 +166,13 @@
         let monRolePublic = ""; 
         let monRoleSecret = "En attente...";
         let listeJoueurs = []; 
+        let statutJoueurs = {}; // Stocke qui est 'vivant' ou 'mort'
         let estVivant = true;
         
+        // Variables pour le dépouillement du MJ
+        let votesRecus = {};
+        let quiAVote = [];
+
         function rejoindre(roleChoisi) {
             family = document.getElementById('familyName').value.trim().toLowerCase();
             pseudo = document.getElementById('playerPseudo').value.trim();
@@ -192,7 +206,7 @@
             client.on('message', function (topic, message) {
                 const msg = message.toString();
 
-                // 1. Le MJ reçoit les inscriptions
+                // 1. Le MJ reçoit les inscriptions au lobby
                 if (topic.endsWith("/lobby") && monRolePublic === 'mj') {
                     if (!listeJoueurs.includes(msg)) {
                         listeJoueurs.push(msg);
@@ -200,27 +214,41 @@
                     }
                 }
 
-                // 2. Le joueur reçoit son rôle
+                // 2. Le MJ reçoit les votes en direct
+                if (topic.endsWith("/votes") && monRolePublic === 'mj') {
+                    const parts = msg.split("->");
+                    const votant = parts[0];
+                    const cible = parts[1];
+                    
+                    if (!quiAVote.includes(votant)) {
+                        quiAVote.push(votant);
+                        votesRecus[cible] = (votesRecus[cible] || 0) + 1;
+                        afficherVotesChezMJ();
+                    }
+                }
+
+                // 3. Le joueur reçoit son rôle secret
                 if (topic.includes("/private/") && monRolePublic === 'joueur') {
                     monRoleSecret = msg;
                     document.getElementById('gameStatus').innerText = "Rôle reçu ! 🤫";
                 }
 
-                // 3. Messages globaux (Ordres du MJ)
+                // 4. Canal de communication global
                 if (topic.endsWith("/global")) {
                     const statusText = document.getElementById('gameStatus');
                     
                     if (msg === 'NUIT') {
                         document.body.classList.add('nuit');
-                        statusText.innerText = "La nuit tombe... Tout le monde dort 🌙";
+                        statusText.innerText = "La nuit tombe... Tout le monde dont 🌙";
                     } 
                     else if (msg === 'JOUR') {
                         document.body.classList.remove('nuit');
                         statusText.innerText = "Le soleil se lève... ☀️";
                     } 
                     else if (msg.startsWith('START:')) {
-                        // Récupère la liste finale des joueurs envoyée par le MJ
                         listeJoueurs = msg.replace('START:', '').split(',');
+                        listeJoueurs.forEach(p => { statutJoueurs[p] = 'vivant'; });
+                        
                         if(monRolePublic === 'joueur') {
                             document.getElementById('village-life-zone').style.display = 'block';
                             creerListeJoueursPublic();
@@ -229,13 +257,24 @@
                     }
                     else if (msg.startsWith('MORT:')) {
                         const victime = msg.replace('MORT:', '');
+                        statutJoueurs[victime] = 'mort';
                         marquerMort(victime);
+                    }
+                    else if (msg === 'VOTE_OUVERT') {
+                        if (monRolePublic === 'joueur' && estVivant) {
+                            ouvrirBoitierVoteJoueur();
+                        }
+                        statusText.innerText = "⚖️ Le tribunal du village est ouvert ! Votez !";
+                    }
+                    else if (msg === 'VOTE_FERME') {
+                        document.getElementById('vote-zone').style.display = 'none';
+                        statusText.innerText = "🔒 Le vote est clos. Le Maître décompte...";
                     }
                 }
             });
         }
 
-        // --- FONCTIONS DU JOUEUR ---
+        // --- FONCTIONS JOUEURS ---
         function revelerRole() {
             const card = document.getElementById('roleCard');
             if (card.innerText === "CLIQUEZ POUR RÉVÉLER") {
@@ -255,24 +294,46 @@
             });
         }
 
+        function ouvrirBoitierVoteJoueur() {
+            const select = document.getElementById('voteSelect');
+            select.innerHTML = '<option value="">-- Choisir un suspect --</option>';
+            
+            // On remplit la liste déroulante uniquement avec les joueurs EN VIE
+            listeJoueurs.forEach(p => {
+                if (statutJoueurs[p] === 'vivant') {
+                    select.innerHTML += `<option value="${p}">${p}</option>`;
+                }
+            });
+            document.getElementById('vote-zone').style.display = 'block';
+        }
+
+        function validerVote() {
+            const cible = document.getElementById('voteSelect').value;
+            if (!cible) return alert("Sélectionnez quelqu'un avant de valider !");
+            
+            // Envoi du vote au MJ de façon anonyme/directe
+            client.publish("loupgarufamille/" + family + "/votes", pseudo + "->" + cible);
+            
+            // On masque le boîtier pour éviter de revoter
+            document.getElementById('vote-zone').style.display = 'none';
+            document.getElementById('gameStatus').innerText = "🗳️ Vote enregistré ! En attente des autres...";
+        }
+
         function marquerMort(nomVictime) {
-            // Si c'est moi qui suis mort
             if (monRolePublic === 'joueur' && pseudo.toLowerCase() === nomVictime.toLowerCase()) {
                 estVivant = false;
                 document.body.classList.add('elimine');
                 document.getElementById('gameStatus').innerText = "Vous avez été éliminé... 💀";
                 document.getElementById('gameStatus').style.color = "red";
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]); // Fait vibrer le téléphone
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
             }
 
-            // Mettre à jour l'affichage sur la liste publique
             const liPublic = document.getElementById(`public-p-${nomVictime.toLowerCase()}`);
             if (liPublic) {
                 liPublic.classList.add('mort');
                 document.getElementById(`public-status-${nomVictime.toLowerCase()}`).innerText = "Mort 💀";
             }
 
-            // Mettre à jour l'affichage sur la liste du MJ
             const liMJ = document.getElementById(`mj-p-${nomVictime.toLowerCase()}`);
             if (liMJ) {
                 liMJ.classList.add('mort');
@@ -281,7 +342,7 @@
             }
         }
 
-        // --- FONCTIONS DU MAÎTRE DU JEU ---
+        // --- FONCTIONS MAÎTRE DU JEU ---
         function mettreAJourLobbyMJ() {
             document.getElementById('count').innerText = listeJoueurs.length;
             const ul = document.getElementById('mjLobbyList');
@@ -305,22 +366,58 @@
             roles.sort(() => Math.random() - 0.5);
 
             for (let i = 0; i < nbJoueurs; i++) {
+                statutJoueurs[listeJoueurs[i]] = 'vivant'; // Le MJ initialise les états
                 client.publish("loupgarufamille/" + family + "/private/" + listeJoueurs[i].toLowerCase(), roles[i]);
             }
 
-            // Le MJ envoie la liste des joueurs à tout le monde pour créer le tableau des vivants/morts
             client.publish("loupgarufamille/" + family + "/global", "START:" + listeJoueurs.join(','));
 
-            // Basculer l'écran MJ en mode jeu
             document.getElementById('mj-lobby').style.display = 'none';
             document.getElementById('mj-game-actions').style.display = 'block';
             
-            // Créer la liste de gestion des morts pour le MJ
+            creerListeGestionMJ();
+        }
+
+        function creerListeGestionMJ() {
             const ul = document.getElementById('mjInGameList');
             ul.innerHTML = "";
             listeJoueurs.forEach(p => {
                 ul.innerHTML += `<li id="mj-p-${p.toLowerCase()}"><span>👤 ${p}</span> <button id="btn-kill-${p.toLowerCase()}" class="btn-small-kill" onclick="eliminerJoueur('${p}')">💀 Éliminer</button></li>`;
             });
+        }
+
+        // --- NOUVELLES FONCTIONS DE VOTE POUR LE MJ ---
+        function ouvrirVote() {
+            votesRecus = {};
+            quiAVote = [];
+            document.getElementById('mj-vote-live-results').innerHTML = "<b>Dépouillement en direct :</b><br>En attente du premier vote...";
+            document.getElementById('btn-fermer-vote').style.display = 'inline-block';
+            
+            // Le MJ écoute la ligne de vote
+            client.subscribe("loupgarufamille/" + family + "/votes");
+            // Le MJ ordonne aux téléphones d'ouvrir le boîtier
+            client.publish("loupgarufamille/" + family + "/global", "VOTE_OUVERT");
+        }
+
+        function afficherVotesChezMJ() {
+            const div = document.getElementById('mj-vote-live-results');
+            div.innerHTML = "<b>Dépouillement en direct :</b><br>";
+            
+            // On affiche le score de chaque personne ciblée
+            for (let suspect in votesRecus) {
+                div.innerHTML += `🎯 ${suspect} : <strong>${votesRecus[suspect]} vote(s)</strong><br>`;
+            }
+            
+            // Compteur global de participation
+            let totalVivants = listeJoueurs.filter(p => statutJoueurs[p] === 'vivant').length;
+            div.innerHTML += `<br><small>Participation : ${quiAVote.length} / ${totalVivants} joueurs vivants</small>`;
+        }
+
+        function fermerVote() {
+            document.getElementById('btn-fermer-vote').style.display = 'none';
+            client.unsubscribe("loupgarufamille/" + family + "/votes");
+            // Ordonne aux joueurs de fermer le boîtier
+            client.publish("loupgarufamille/" + family + "/global", "VOTE_FERME");
         }
 
         function eliminerJoueur(nomJoueur) {
