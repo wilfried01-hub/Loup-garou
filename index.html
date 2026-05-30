@@ -82,15 +82,21 @@
         li.mort { text-decoration: line-through; opacity: 0.4; background: rgba(138, 3, 3, 0.2); color: #ff6666; }
 
         #screen-game, #mj-controls, #player-role-zone, #village-life-zone, #vote-zone { display: none; }
+        
+        .btn-reset {
+            position: absolute; top: 10px; right: 10px; padding: 4px 8px; font-size: 11px;
+            border-color: #444; color: #888; width: auto; margin: 0;
+        }
     </style>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
 </head>
 <body>
 
+    <button class="btn-reset" onclick="reinitialiserPartie()">🔄 Reset</button>
+
     <h1>🐺 LE LOUP-GAROU 🐺</h1>
 
-    <!-- ÉCRAN 1 : CONFIGURATION -->
     <div id="screen-setup" class="card">
         <h2>Configuration de la partie</h2>
         <input type="text" id="familyName" placeholder="Nom du groupe">
@@ -100,14 +106,12 @@
         <button onclick="rejoindre('joueur')">🛡️ Être un Joueur</button>
     </div>
 
-    <!-- ÉCRAN 2 : LE JEU EN DIRECT -->
     <div id="screen-game">
         <div class="card">
             <h2 id="roleTitle">Salon de jeu</h2>
             <p id="gameStatus" class="status">Connexion en cours... ⏳</p>
         </div>
 
-        <!-- ZONE DE VOTE AUTOMATIQUE -->
         <div id="vote-zone" class="card" style="border-color: orange;">
             <h3>⚖️ LE TRIBUNAL DU VILLAGE</h3>
             <p>Sélectionnez le suspect à éliminer :</p>
@@ -116,7 +120,6 @@
             <button onclick="validerVote()" style="border-color: orange; color: orange;">🗳️ Valider mon vote</button>
         </div>
 
-        <!-- ZONE RÔLE SECRET -->
         <div id="player-role-zone" class="card">
             <h3>👁️ Votre Rôle Secret :</h3>
             <div id="roleCard" class="secret-card" onclick="revelerRole()">
@@ -125,17 +128,14 @@
             <p id="roleDesc" style="font-style: italic; color: #ffcc00; margin-top: 15px; font-size: 15px; min-height: 20px; font-weight: bold;"></p>
         </div>
 
-        <!-- ZONE LISTE DU VILLAGE -->
         <div id="village-life-zone" class="card">
             <h3>👥 Habitants du Village :</h3>
             <ul id="villagePlayersList"></ul>
         </div>
 
-        <!-- ZONE MAÎTRE DU JEU -->
         <div id="mj-controls" class="card" style="border-color: var(--accent-blood);">
             <h2>Panneau de Contrôle (MJ)</h2>
             
-            <!-- Avant de lancer -->
             <div id="mj-lobby">
                 <p>⚙️ Choix de la variante :</p>
                 <select id="gameModeSelect">
@@ -148,12 +148,10 @@
                 <button onclick="distribuerRoles()" class="btn-blood">🎲 Distribuer les Rôles & Lancer</button>
             </div>
 
-            <!-- Pendant le jeu -->
             <div id="mj-game-actions" style="display:none;">
                 <button onclick="envoyerAction('NUIT')">💤 Faire dormir le village</button>
                 <button onclick="envoyerAction('JOUR')">☀️ Réveiller le village</button>
                 
-                <!-- Contrôle des votes -->
                 <div style="margin-top:15px; background: rgba(0,0,0,0.3); padding:10px; border-radius:8px;">
                     <button onclick="ouvrirVote()" style="border-color: orange; color: orange;">🗳️ Lancer un Vote</button>
                     <button id="btn-fermer-vote" onclick="fermerVote()" style="display:none; border-color: #ffcc00; color: #ffcc00;">🔒 Clôturer le Vote</button>
@@ -174,10 +172,25 @@
         let monRoleSecret = "En attente...";
         let listeJoueurs = []; 
         let statutJoueurs = {}; 
-        let rolesJoueurs = {}; // Mémoire globale du MJ pour stocker la distribution
+        let rolesJoueurs = {}; 
         let estVivant = true;
+        let gameStarted = false;
         let votesRecus = {};
         let quiAVote = [];
+
+        // 1. Dictionnaire d'effets sonores libres de droits
+        const sons = {
+            nuit: new Audio('https://actions.google.com/sounds/v1/animals/wolf_howl.ogg'),
+            jour: new Audio('https://assets.mixkit.co/active_storage/sfx/1006/1006-84.wav'),
+            mort: new Audio('https://assets.mixkit.co/active_storage/sfx/3005/3005-84.wav'),
+            victoire: new Audio('https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav')
+        };
+
+        function jouerSon(type) {
+            if(sons[type]) {
+                sons[type].play().catch(e => console.log("Audio bloqué en attente d'interaction :", e));
+            }
+        }
 
         const descriptionsFlash = {
             "Loup-Garou": "Éliminez un villageois chaque nuit avec vos compères.",
@@ -201,14 +214,61 @@
             "Idiot du Village": "🤪"
         };
 
-        function rejoindre(roleChoisi) {
-            family = document.getElementById('familyName').value.trim().toLowerCase();
-            pseudo = document.getElementById('playerPseudo').value.trim();
-            monRolePublic = roleChoisi;
+        // 2. Gestion de la Sauvegarde Locale (Anti-rafraîchissement)
+        function sauvegarderEtat(phaseSpecifique) {
+            localStorage.setItem('lg_family', family);
+            localStorage.setItem('lg_pseudo', pseudo);
+            localStorage.setItem('lg_monRolePublic', monRolePublic);
+            localStorage.setItem('lg_monRoleSecret', monRoleSecret);
+            localStorage.setItem('lg_estVivant', estVivant);
+            localStorage.setItem('lg_gameStarted', gameStarted);
+            localStorage.setItem('lg_listeJoueurs', JSON.stringify(listeJoueurs));
+            localStorage.setItem('lg_statutJoueurs', JSON.stringify(statutJoueurs));
+            localStorage.setItem('lg_rolesJoueurs', JSON.stringify(rolesJoueurs));
+            if(phaseSpecifique) localStorage.setItem('lg_phase', phaseSpecifique);
+        }
 
-            if(!family) return alert("Entrez un nom de famille !");
-            if(monRolePublic === 'joueur' && !pseudo) return alert("Entrez votre prénom !");
-            if(monRolePublic === 'mj') pseudo = "Maître du Jeu";
+        window.onload = function() {
+            if (localStorage.getItem('lg_family')) {
+                family = localStorage.getItem('lg_family');
+                pseudo = localStorage.getItem('lg_pseudo');
+                monRolePublic = localStorage.getItem('lg_monRolePublic');
+                monRoleSecret = localStorage.getItem('lg_monRoleSecret');
+                estVivant = localStorage.getItem('lg_estVivant') === 'true';
+                gameStarted = localStorage.getItem('lg_gameStarted') === 'true';
+                listeJoueurs = JSON.parse(localStorage.getItem('lg_listeJoueurs') || '[]');
+                statutJoueurs = JSON.parse(localStorage.getItem('lg_statutJoueurs') || '{}');
+                rolesJoueurs = JSON.parse(localStorage.getItem('lg_rolesJoueurs') || '{}');
+
+                document.getElementById('familyName').value = family;
+                document.getElementById('playerPseudo').value = (monRolePublic === 'mj') ? "" : pseudo;
+                
+                // Reconnaissance et ré-assemblage automatique de l'interface
+                rejoindre(monRolePublic, true);
+            }
+        };
+
+        function reinitialiserPartie() {
+            if (confirm("Voulez-vous vraiment effacer la partie en cours pour en démarrer une nouvelle ?")) {
+                localStorage.clear();
+                window.location.reload();
+            }
+        }
+
+        function rejoindre(roleChoisi, estRestauration = false) {
+            if(!estRestauration) {
+                family = document.getElementById('familyName').value.trim().toLowerCase();
+                pseudo = document.getElementById('playerPseudo').value.trim();
+                monRolePublic = roleChoisi;
+                estVivant = true;
+                gameStarted = false;
+
+                if(!family) return alert("Entrez un nom de famille !");
+                if(monRolePublic === 'joueur' && !pseudo) return alert("Entrez votre prénom !");
+                if(monRolePublic === 'mj') pseudo = "Maître du Jeu";
+                
+                sauvegarderEtat('LOBBY');
+            }
 
             document.getElementById('screen-setup').style.display = 'none';
             document.getElementById('screen-game').style.display = 'block';
@@ -223,12 +283,31 @@
                     document.getElementById('mj-controls').style.display = 'block';
                     document.getElementById('roleTitle').innerText = "🧙‍♂️ Vous êtes le Maître du Jeu";
                     client.subscribe("loupgarufamille/" + family + "/lobby");
+                    
+                    if (estRestauration && gameStarted) {
+                        document.getElementById('mj-lobby').style.display = 'none';
+                        document.getElementById('mj-game-actions').style.display = 'block';
+                        creerListeGestionMJ();
+                    } else if (estRestauration) {
+                        mettreAJourLobbyMJ();
+                    }
                 } else {
                     document.getElementById('roleTitle').innerText = "🧑‍🌾 Joueur : " + pseudo;
                     document.getElementById('player-role-zone').style.display = 'block';
                     client.subscribe("loupgarufamille/" + family + "/private/" + pseudo.toLowerCase());
-                    client.publish("loupgarufamille/" + family + "/lobby", pseudo);
+                    
+                    if (!estRestauration) {
+                        client.publish("loupgarufamille/" + family + "/lobby", pseudo);
+                    } else if (gameStarted) {
+                        document.getElementById('village-life-zone').style.display = 'block';
+                        creerListeJoueursPublic();
+                    }
                 }
+
+                // Restaurer la couleur visuelle de la phase
+                let phaseMise = localStorage.getItem('lg_phase');
+                if (phaseMise === 'NUIT') document.body.classList.add('nuit');
+                if (!estVivant) appliquerVisuelMort();
             });
 
             client.on('message', function (topic, message) {
@@ -238,6 +317,7 @@
                     if (!listeJoueurs.includes(msg)) {
                         listeJoueurs.push(msg);
                         mettreAJourLobbyMJ();
+                        sauvegarderEtat();
                     }
                 }
 
@@ -255,6 +335,7 @@
                 if (topic.includes("/private/") && monRolePublic === 'joueur') {
                     monRoleSecret = msg;
                     document.getElementById('gameStatus').innerText = "Rôle reçu ! 🤫";
+                    sauvegarderEtat();
                 }
 
                 if (topic.endsWith("/global")) {
@@ -263,24 +344,35 @@
                     if (msg === 'NUIT') {
                         document.body.classList.add('nuit');
                         statusText.innerText = "La nuit tombe... Tout le monde dort 🌙";
+                        jouerSon('nuit');
+                        sauvegarderEtat('NUIT');
                     } 
                     else if (msg === 'JOUR') {
                         document.body.classList.remove('nuit');
                         statusText.innerText = "Le soleil se lève... ☀️";
+                        jouerSon('jour');
+                        sauvegarderEtat('JOUR');
                     } 
                     else if (msg.startsWith('START:')) {
                         listeJoueurs = msg.replace('START:', '').split(',');
                         listeJoueurs.forEach(p => { statutJoueurs[p] = 'vivant'; });
+                        gameStarted = true;
                         if(monRolePublic === 'joueur') {
                             document.getElementById('village-life-zone').style.display = 'block';
                             creerListeJoueursPublic();
                         }
                         statusText.innerText = "La partie commence !";
+                        sauvegarderEtat('JOUR');
                     }
                     else if (msg.startsWith('MORT:')) {
                         const victime = msg.replace('MORT:', '');
                         statutJoueurs[victime] = 'mort';
+                        jouerSon('mort');
                         marquerMort(victime);
+                        sauvegarderEtat();
+                        
+                        // Déclenchement automatique du calcul de victoire chez le MJ
+                        if (monRolePublic === 'mj') verifierVictoire();
                     }
                     else if (msg === 'VOTE_OUVERT') {
                         if (monRolePublic === 'joueur' && estVivant) ouvrirBoitierVoteJoueur();
@@ -289,6 +381,17 @@
                     else if (msg === 'VOTE_FERME') {
                         document.getElementById('vote-zone').style.display = 'none';
                         statusText.innerText = "🔒 Le vote est clos. Le Maître décompte...";
+                    }
+                    else if (msg.startsWith('VICTOIRE:')) {
+                        jouerSon('victoire');
+                        const camp = msg.split(':')[1];
+                        statusText.style.color = "#ffcc00";
+                        if (camp === 'LOUPS') {
+                            statusText.innerHTML = "🎉 VICTOIRE DES LOUPS-GAROUS ! 🐺<br><small>Le village a été entièrement dévoré...</small>";
+                        } else {
+                            statusText.innerHTML = "🎉 VICTOIRE DU VILLAGE ! 🧑‍🌾<br><small>Tous les Loups-Garous ont été éliminés !</small>";
+                        }
+                        statusText.innerHTML += `<br><button onclick="reinitialiserPartie()" style="margin-top:20px; background-color:var(--accent-gold); color:black; width:auto; padding:8px 16px; font-size:14px;">🔄 Recommencer</button>`;
                     }
                 }
             });
@@ -314,12 +417,9 @@
             const ul = document.getElementById('villagePlayersList');
             ul.innerHTML = "";
             listeJoueurs.forEach(p => {
-                ul.innerHTML += `<li id="public-p-${p.toLowerCase()}"><span>👤 ${p}</span> <b style="color:#4eed50" id="public-status-${p.toLowerCase()}">Vivant</b></li>`;
+                const estMort = statutJoueurs[p] === 'mort';
+                ul.innerHTML += `<li id="public-p-${p.toLowerCase()}" class="${estMort?'mort':''}"><span>👤 ${p}</span> <b style="color:${estMort?'#ff6666':'#4eed50'}" id="public-status-${p.toLowerCase()}">${estMort?'Mort 💀':'Vivant'}</b></li>`;
             });
-        }
-
-        function abrirBoitierVoteJoueur() { // (Nom gardé identique en interne pour MQTT)
-            ouvrirBoitierVoteJoueur();
         }
         
         function ouvrirBoitierVoteJoueur() {
@@ -341,19 +441,24 @@
             document.getElementById('gameStatus').innerText = "🗳️ Vote enregistré ! En attente des autres...";
         }
 
+        function appliquerVisuelMort() {
+            document.body.classList.add('elimine');
+            document.getElementById('gameStatus').innerText = "Vous avez été éliminé... 💀";
+            document.getElementById('gameStatus').style.color = "red";
+        }
+
         function marquerMort(nomVictime) {
             if (monRolePublic === 'joueur' && pseudo.toLowerCase() === nomVictime.toLowerCase()) {
                 estVivant = false;
-                document.body.classList.add('elimine');
-                document.getElementById('gameStatus').innerText = "Vous avez été éliminé... 💀";
-                document.getElementById('gameStatus').style.color = "red";
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+                appliquerVisuelMort();
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 400]);
             }
 
             const liPublic = document.getElementById(`public-p-${nomVictime.toLowerCase()}`);
             if (liPublic) {
                 liPublic.classList.add('mort');
-                document.getElementById(`public-status-${nomVictime.toLowerCase()}`).innerText = "Mort 💀";
+                const stPub = document.getElementById(`public-status-${nomVictime.toLowerCase()}`);
+                if(stPub) { stPub.innerText = "Mort 💀"; stPub.style.color = "#ff6666"; }
             }
 
             const liMJ = document.getElementById(`mj-p-${nomVictime.toLowerCase()}`);
@@ -400,19 +505,21 @@
 
             roles.sort(() => Math.random() - 0.5);
 
-            rolesJoueurs = {}; // Réinitialise la mémoire du MJ
+            rolesJoueurs = {}; 
             for (let i = 0; i < nbJoueurs; i++) {
                 statutJoueurs[listeJoueurs[i]] = 'vivant';
-                rolesJoueurs[listeJoueurs[i]] = roles[i]; // On enregistre le rôle localement chez le MJ
+                rolesJoueurs[listeJoueurs[i]] = roles[i]; 
                 client.publish("loupgarufamille/" + family + "/private/" + listeJoueurs[i].toLowerCase(), roles[i]);
             }
 
+            gameStarted = true;
             client.publish("loupgarufamille/" + family + "/global", "START:" + listeJoueurs.join(','));
 
             document.getElementById('mj-lobby').style.display = 'none';
             document.getElementById('mj-game-actions').style.display = 'block';
             
             creerListeGestionMJ();
+            sauvegarderEtat('JOUR');
         }
 
         function creerListeGestionMJ() {
@@ -421,14 +528,41 @@
             listeJoueurs.forEach(p => {
                 const roleText = rolesJoueurs[p] || "Villageois";
                 const emoji = emojisRoles[roleText] || "👤";
+                const estMort = statutJoueurs[p] === 'mort';
                 
-                // Affichage personnalisé pour le MJ : Émoji + Prénom + (Nom du rôle)
                 ul.innerHTML += `
-                    <li id="mj-p-${p.toLowerCase()}">
+                    <li id="mj-p-${p.toLowerCase()}" class="${estMort?'mort':''}">
                         <span>${emoji} <strong>${p}</strong> <small style="color:var(--accent-gold); margin-left:5px;">(${roleText})</small></span> 
-                        <button id="btn-kill-${p.toLowerCase()}" class="btn-small-kill" onclick="eliminerJoueur('${p}')">💀 Éliminer</button>
+                        <button id="btn-kill-${p.toLowerCase()}" class="btn-small-kill" style="display:${estMort?'none':'inline-block'}" onclick="eliminerJoueur('${p}')">💀 Éliminer</button>
                     </li>`;
             });
+        }
+
+        // 3. Calculateur de Victoire Automatique (Géré par le MJ)
+        function verifierVictoire() {
+            if (monRolePublic !== 'mj') return;
+            
+            let loupsVivants = 0;
+            let villageoisVivants = 0;
+
+            listeJoueurs.forEach(p => {
+                if (statutJoueurs[p] === 'vivant') {
+                    if (rolesJoueurs[p] === "Loup-Garou") {
+                        loupsVivants++;
+                    } else {
+                        // L'idiot, le chasseur, la voyante, etc. font tous partie du camp village
+                        villageoisVivants++;
+                    }
+                }
+            });
+
+            if (loupsVivants === 0) {
+                // Plus aucun loup : Victoire du village !
+                client.publish("loupgarufamille/" + family + "/global", "VICTOIRE:VILLAGE");
+            } else if (loupsVivants >= villageoisVivants) {
+                // Autant ou plus de loups que de villageois : Victoire des loups !
+                client.publish("loupgarufamille/" + family + "/global", "VICTOIRE:LOUPS");
+            }
         }
 
         function ouvrirVote() {
